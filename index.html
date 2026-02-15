@@ -3,38 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>DUDO - World Game</title>
+    <title>DUDO WORLD</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script type="importmap">
-    {
-      "imports": {
-        "react": "https://esm.sh/react@18.2.0",
-        "react-dom": "https://esm.sh/react-dom@18.2.0",
-        "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
-        "firebase/database": "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js"
-      }
-    }
-    </script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+
     <style>
-        body { background-color: #0f172a; color: white; user-select: none; -webkit-tap-highlight-color: transparent; font-family: system-ui, sans-serif; }
-        .active-turn { animation: pulse-glow 2s infinite; }
-        @keyframes pulse-glow {
-            0%, 100% { box-shadow: 0 0 5px rgba(59, 130, 246, 0.5); border-color: rgba(59, 130, 246, 0.5); }
-            50% { box-shadow: 0 0 20px rgba(59, 130, 246, 1); border-color: rgba(59, 130, 246, 1); }
-        }
-        .cup-animation { transition: transform 0.3s ease; }
+        body { background-color: #0f172a; color: white; user-select: none; font-family: sans-serif; margin: 0; }
+        .active-turn { border: 3px solid #3b82f6; box-shadow: 0 0 15px #3b82f6; }
+        .dice-red { fill: #ef4444; }
+        .dice-blue { fill: #334155; }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
-    <script type="module">
-        import React, { useState, useEffect } from 'react';
-        import ReactDOM from 'react-dom';
-        import { initializeApp } from 'firebase/app';
-        import { getDatabase, ref, set, onValue, update, get } from 'firebase/database';
-
-        // --- FIREBASE CONFIG (YOURS) ---
+    <script>
+        // --- CONFIGURATION ---
         const firebaseConfig = {
             apiKey: "AIzaSyCUvDUDrj1MofAFRYeDrGP7OoIz0qX0iW8",
             authDomain: "dudogame-44b81.firebaseapp.com",
@@ -45,191 +32,156 @@
             appId: "1:681233339238:web:c8ed065e83227b6bd22ea7"
         };
 
-        const app = initializeApp(firebaseConfig);
-        const db = getDatabase(app);
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
 
-        // --- ICONS ---
+        const { useState, useEffect } = React;
+
+        // --- DICE COMPONENT ---
         const DiceIcon = ({ value, size = 40 }) => {
             const dots = {
                 1: [[50, 50]], 2: [[25, 25], [75, 75]], 3: [[25, 25], [50, 50], [75, 75]],
-                4: [[25, 25], [25, 75], [75, 25], [75, 75]], 
-                5: [[25, 25], [25, 75], [50, 50], [75, 25], [75, 75]],
+                4: [[25, 25], [25, 75], [75, 25], [75, 75]], 5: [[25, 25], [25, 75], [50, 50], [75, 25], [75, 75]],
                 6: [[25, 25], [25, 50], [25, 75], [75, 25], [75, 50], [75, 75]]
             };
-            return (
-                <svg width={size} height={size} viewBox="0 0 100 100">
-                    <rect x="5" y="5" width="90" height="90" rx="15" fill={value === 1 ? '#ef4444' : '#334155'} />
-                    {dots[value]?.map(([cx, cy], i) => <circle key={i} cx={cx} cy={cy} r="8" fill="white" />)}
-                </svg>
+            return React.createElement('svg', { width: size, height: size, viewBox: '0 0 100 100', style: { display: 'inline-block' } },
+                React.createElement('rect', { x: 5, y: 5, width: 90, height: 90, rx: 15, className: value === 1 ? 'dice-red' : 'dice-blue' }),
+                dots[value]?.map(([cx, cy], i) => React.createElement('circle', { key: i, cx, cy, r: 8, fill: 'white' }))
             );
         };
 
-        const IconUser = ({ id }) => {
-            const colors = ['#f87171', '#60a5fa', '#34d399', '#fbbf24', '#a78bfa'];
-            return (
-                <svg width="40" height="40" viewBox="0 0 24 24" fill={colors[id % colors.length]}>
-                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
-                </svg>
-            );
-        };
-
-        // --- APP LOGIC ---
+        // --- MAIN APP ---
         const App = () => {
             const [pid] = useState(() => {
                 let id = sessionStorage.getItem('dudo_pid');
                 if (!id) { id = Math.random().toString(36).substring(2, 7); sessionStorage.setItem('dudo_pid', id); }
                 return id;
             });
-            const [roomId, setRoomId] = useState('');
             const [inRoom, setInRoom] = useState(null);
+            const [roomInput, setRoomInput] = useState('');
             const [gameState, setGameState] = useState(null);
             const [cupOpen, setCupOpen] = useState(false);
             const [localBid, setLocalBid] = useState({ quantity: 1, value: 2 });
 
             useEffect(() => {
                 if (!inRoom) return;
-                const roomRef = ref(db, `rooms/${inRoom}`);
-                return onValue(roomRef, (snap) => setGameState(snap.val()));
+                const roomRef = db.ref(`rooms/${inRoom}`);
+                roomRef.on('value', (snap) => setGameState(snap.val()));
+                return () => roomRef.off();
             }, [inRoom]);
 
-            const createRoom = async () => {
+            const createRoom = () => {
                 const id = Math.floor(1000 + Math.random() * 9000).toString();
                 const initial = {
                     roomId: id, phase: 'LOBBY', turnIndex: 0,
                     playerSequence: [pid], players: { [pid]: { id: pid, diceCount: 5, dice: [], avatarId: Math.floor(Math.random() * 5) } }
                 };
-                await set(ref(db, `rooms/${id}`), initial);
+                db.ref(`rooms/${id}`).set(initial);
                 setInRoom(id);
             };
 
-            const joinRoom = async () => {
-                const snap = await get(ref(db, `rooms/${roomId}`));
-                if (snap.exists()) {
-                    const data = snap.val();
-                    if (!data.players[pid]) {
-                        await update(ref(db, `rooms/${roomId}/players`), { [pid]: { id: pid, diceCount: 5, dice: [], avatarId: Math.floor(Math.random() * 5) } });
-                        await update(ref(db, `rooms/${roomId}`), { playerSequence: [...data.playerSequence, pid] });
+            const joinRoom = () => {
+                db.ref(`rooms/${roomInput}`).once('value', (snap) => {
+                    if (snap.exists()) {
+                        const data = snap.val();
+                        if (!data.players[pid]) {
+                            db.ref(`rooms/${roomInput}/players/${pid}`).set({ id: pid, diceCount: 5, dice: [], avatarId: Math.floor(Math.random() * 5) });
+                            db.ref(`rooms/${roomInput}/playerSequence`).set([...data.playerSequence, pid]);
+                        }
+                        setInRoom(roomInput);
                     }
-                    setInRoom(roomId);
-                }
+                });
             };
 
-            const startGame = async () => {
+            const startGame = () => {
                 const updated = { ...gameState.players };
                 Object.keys(updated).forEach(id => {
                     updated[id].dice = Array.from({ length: updated[id].diceCount }, () => Math.floor(Math.random() * 6) + 1);
                 });
-                await update(ref(db, `rooms/${inRoom}`), { phase: 'PLAYING', players: updated, currentBid: null, turnIndex: 0 });
+                db.ref(`rooms/${inRoom}`).update({ phase: 'PLAYING', players: updated, currentBid: null, turnIndex: 0 });
             };
 
-            const placeBid = async () => {
-                const nextTurn = (gameState.turnIndex + 1) % gameState.playerSequence.length;
-                await update(ref(db, `rooms/${inRoom}`), { currentBid: { ...localBid, playerId: pid }, turnIndex: nextTurn });
-            };
-
-            const callDudo = async () => {
-                const bid = gameState.currentBid;
-                const allDice = Object.values(gameState.players).flatMap(p => p.dice);
-                const count = allDice.filter(d => d === bid.value || d === 1).length;
-                const success = count >= bid.quantity;
-                const loserId = success ? pid : bid.playerId;
-                
-                const updated = { ...gameState.players };
-                updated[loserId].diceCount -= 1;
-                
-                await update(ref(db, `rooms/${inRoom}`), { 
-                    phase: 'REVEALED', players: updated, 
-                    lastAction: { type: 'DUDO', success, diceSnapshot: Object.fromEntries(Object.entries(gameState.players).map(([k,v]) => [k, v.dice])) } 
-                });
-            };
-
-            if (!inRoom) return (
-                <div className="flex flex-col items-center justify-center h-screen space-y-8">
-                    <h1 className="text-6xl font-black text-blue-500">DUDO</h1>
-                    <button onClick={createRoom} className="p-6 bg-blue-600 rounded-2xl text-4xl">＋</button>
-                    <div className="flex space-x-2">
-                        <input value={roomId} onChange={e => setRoomId(e.target.value)} className="bg-slate-800 p-4 rounded-xl text-center text-2xl w-32" placeholder="0000" />
-                        <button onClick={joinRoom} className="bg-green-600 p-4 rounded-xl">➜</button>
-                    </div>
-                </div>
+            if (!inRoom) return React.createElement('div', { className: 'flex flex-col items-center justify-center h-screen space-y-8' },
+                React.createElement('h1', { className: 'text-6xl font-black text-blue-500' }, 'DUDO'),
+                React.createElement('button', { onClick: createRoom, className: 'p-8 bg-blue-600 rounded-full text-4xl shadow-xl' }, '＋'),
+                React.createElement('div', { className: 'flex space-x-2' },
+                    React.createElement('input', { value: roomInput, onChange: e => setRoomInput(e.target.value), className: 'bg-slate-800 p-4 rounded-xl text-center text-2xl w-32', placeholder: '0000' }),
+                    React.createElement('button', { onClick: joinRoom, className: 'bg-green-600 p-4 rounded-xl text-2xl' }, '➜')
+                )
             );
 
-            if (!gameState) return null;
+            if (!gameState) return React.createElement('div', null, 'Loading...');
+
             const isMyTurn = gameState.phase === 'PLAYING' && gameState.playerSequence[gameState.turnIndex] === pid;
             const me = gameState.players[pid];
 
-            return (
-                <div className="flex flex-col h-screen p-4">
-                    <div className="text-center text-slate-500 font-mono mb-4">#{inRoom}</div>
-                    
-                    {/* Players List */}
-                    <div className="grid grid-cols-4 gap-2 mb-8">
-                        {gameState.playerSequence.map((id, idx) => (
-                            <div key={id} className={`p-2 rounded-xl flex flex-col items-center ${gameState.turnIndex === idx ? 'active-turn bg-slate-800' : 'opacity-40'}`}>
-                                <IconUser id={gameState.players[id].avatarId} />
-                                <div className="text-[10px] mt-1">{"●".repeat(gameState.players[id].diceCount)}</div>
-                            </div>
-                        ))}
-                    </div>
+            return React.createElement('div', { className: 'flex flex-col h-screen p-4' },
+                React.createElement('div', { className: 'text-center text-slate-500 font-mono mb-4' }, `#${inRoom}`),
+                
+                // Players Area
+                React.createElement('div', { className: 'grid grid-cols-4 gap-2 mb-8' },
+                    gameState.playerSequence.map((id, idx) => React.createElement('div', { key: id, className: `p-2 rounded-xl flex flex-col items-center bg-slate-800 ${gameState.turnIndex === idx ? 'active-turn' : 'opacity-40'}` },
+                        React.createElement('div', { className: 'w-8 h-8 rounded-full bg-slate-600 flex items-center justify-center text-xs' }, id.substring(0, 2)),
+                        React.createElement('div', { className: 'text-[10px] mt-1 text-blue-400' }, "●".repeat(gameState.players[id].diceCount))
+                    ))
+                ),
 
-                    {/* Table */}
-                    <div className="flex-1 flex flex-col items-center justify-center">
-                        {gameState.phase === 'LOBBY' && pid === gameState.playerSequence[0] && (
-                            <button onClick={startGame} className="bg-green-600 p-8 rounded-full text-4xl">▶</button>
-                        )}
-                        
-                        {gameState.currentBid && (
-                            <div className="bg-slate-900 p-8 rounded-3xl border-b-8 border-blue-900 flex items-center space-x-4">
-                                <span className="text-5xl font-bold">{gameState.currentBid.quantity}</span>
-                                <DiceIcon value={gameState.currentBid.value} size={60} />
-                            </div>
-                        )}
+                // Center Table
+                React.createElement('div', { className: 'flex-1 flex flex-col items-center justify-center' },
+                    gameState.phase === 'LOBBY' && pid === gameState.playerSequence[0] && React.createElement('button', { onClick: startGame, className: 'bg-green-600 p-10 rounded-full text-4xl shadow-2xl' }, '▶'),
+                    gameState.currentBid && React.createElement('div', { className: 'bg-slate-900 p-8 rounded-3xl border-b-8 border-blue-900 flex items-center space-x-6 scale-125' },
+                        React.createElement('span', { className: 'text-6xl font-bold' }, gameState.currentBid.quantity),
+                        React.createElement(DiceIcon, { value: gameState.currentBid.value, size: 60 })
+                    ),
+                    gameState.phase === 'REVEALED' && React.createElement('div', { className: 'mt-10 text-center' },
+                        React.createElement('button', { onClick: startGame, className: 'bg-blue-500 px-8 py-4 rounded-xl font-bold' }, 'NEXT ROUND')
+                    )
+                ),
 
-                        {gameState.phase === 'REVEALED' && (
-                            <div className="mt-4 grid grid-cols-6 gap-1">
-                                {Object.values(gameState.lastAction.diceSnapshot).flat().map((d, i) => <DiceIcon key={i} value={d} size={25} />)}
-                                <button onClick={startGame} className="col-span-6 mt-4 bg-blue-500 p-2 rounded">NEXT</button>
-                            </div>
-                        )}
-                    </div>
+                // Controls
+                isMyTurn && React.createElement('div', { className: 'bg-slate-900 p-6 rounded-3xl space-y-6 shadow-2xl mb-4 border border-slate-700' },
+                    React.createElement('div', { className: 'flex justify-between items-center px-4' },
+                        React.createElement('button', { onClick: () => setLocalBid(b => ({...b, quantity: Math.max(1, b.quantity-1)})), className: 'text-4xl bg-slate-800 w-12 h-12 rounded-full' }, '−'),
+                        React.createElement('span', { className: 'text-5xl font-bold' }, localBid.quantity),
+                        React.createElement('button', { onClick: () => setLocalBid(b => ({...b, quantity: b.quantity+1})), className: 'text-4xl bg-slate-800 w-12 h-12 rounded-full' }, '＋')
+                    ),
+                    React.createElement('div', { className: 'flex justify-between items-center px-4' },
+                        React.createElement('button', { onClick: () => setLocalBid(b => ({...b, value: b.value === 1 ? 6 : b.value-1})), className: 'text-4xl bg-slate-800 w-12 h-12 rounded-full' }, '−'),
+                        React.createElement(DiceIcon, { value: localBid.value, size: 60 }),
+                        React.createElement('button', { onClick: () => setLocalBid(b => ({...b, value: b.value === 6 ? 1 : b.value+1})), className: 'text-4xl bg-slate-800 w-12 h-12 rounded-full' }, '＋')
+                    ),
+                    React.createElement('div', { className: 'flex space-x-4' },
+                        gameState.currentBid && React.createElement('button', { onClick: () => {
+                             const bid = gameState.currentBid;
+                             const allDice = Object.values(gameState.players).flatMap(p => p.dice);
+                             const count = allDice.filter(d => d === bid.value || d === 1).length;
+                             const success = count >= bid.quantity;
+                             const loserId = success ? pid : bid.playerId;
+                             const updated = { ...gameState.players };
+                             updated[loserId].diceCount -= 1;
+                             db.ref(`rooms/${inRoom}`).update({ phase: 'REVEALED', players: updated });
+                        }, className: 'flex-1 bg-red-600 p-6 rounded-2xl text-3xl font-bold' }, '？'),
+                        React.createElement('button', { onClick: () => {
+                             const nextTurn = (gameState.turnIndex + 1) % gameState.playerSequence.length;
+                             db.ref(`rooms/${inRoom}`).update({ currentBid: { ...localBid, playerId: pid }, turnIndex: nextTurn });
+                        }, className: 'flex-[2] bg-blue-600 p-6 rounded-2xl text-3xl font-bold' }, '✓')
+                    )
+                ),
 
-                    {/* Controls */}
-                    {isMyTurn && (
-                        <div className="bg-slate-900 p-4 rounded-3xl space-y-4 mb-4">
-                            <div className="flex justify-around items-center">
-                                <button onClick={() => setLocalBid(b => ({...b, quantity: Math.max(1, b.quantity-1)}))} className="text-3xl">－</button>
-                                <span className="text-4xl font-bold">{localBid.quantity}</span>
-                                <button onClick={() => setLocalBid(b => ({...b, quantity: b.quantity+1}))} className="text-3xl">＋</button>
-                                <div className="w-px h-8 bg-slate-700"></div>
-                                <button onClick={() => setLocalBid(b => ({...b, value: b.value === 1 ? 6 : b.value-1}))} className="text-3xl">－</button>
-                                <DiceIcon value={localBid.value} size={40} />
-                                <button onClick={() => setLocalBid(b => ({...b, value: b.value === 6 ? 1 : b.value+1}))} className="text-3xl">＋</button>
-                            </div>
-                            <div className="flex space-x-2">
-                                {gameState.currentBid && <button onClick={callDudo} className="flex-1 bg-red-600 p-4 rounded-2xl text-2xl">？</button>}
-                                <button onClick={placeBid} className="flex-[2] bg-blue-600 p-4 rounded-2xl text-2xl">✓</button>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* My Dice */}
-                    <div className="h-24 flex justify-center items-center">
-                        <div className="relative">
-                            {cupOpen && (
-                                <div className="absolute -top-16 left-1/2 -translate-x-1/2 flex space-x-2 bg-slate-800 p-2 rounded-xl border border-blue-500">
-                                    {me?.dice?.map((d, i) => <DiceIcon key={i} value={d} size={30} />)}
-                                </div>
-                            )}
-                            <button onClick={() => setCupOpen(!cupOpen)} className={`p-6 rounded-full ${cupOpen ? 'bg-blue-600' : 'bg-slate-800'}`}>
-                                🥛
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                // Personal Hand
+                React.createElement('div', { className: 'h-28 flex justify-center items-end' },
+                    React.createElement('div', { className: 'relative' },
+                        cupOpen && React.createElement('div', { className: 'absolute -top-20 left-1/2 -translate-x-1/2 flex space-x-2 bg-slate-800 p-4 rounded-2xl border-2 border-blue-500 shadow-2xl z-50' },
+                            me?.dice?.map((d, i) => React.createElement(DiceIcon, { key: i, value: d, size: 40 }))
+                        ),
+                        React.createElement('button', { onClick: () => setCupOpen(!cupOpen), className: `w-20 h-20 rounded-full text-4xl shadow-xl transition-all ${cupOpen ? 'bg-blue-600 scale-110' : 'bg-slate-800'}` }, '🥛')
+                    )
+                )
             );
         };
 
-        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+        ReactDOM.render(React.createElement(App), document.getElementById('root'));
     </script>
 </body>
 </html>
